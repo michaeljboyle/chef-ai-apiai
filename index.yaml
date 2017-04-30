@@ -1,0 +1,24 @@
+indexes:
+
+- kind: NutritionRecord
+  ancestor: yes
+  properties:
+  - name: date
+    direction: desc
+
+- kind: Weight
+  ancestor: yes
+  properties:
+  - name: date
+    direction: desc
+
+- kind: RecipeRecord
+  ancestor: yes
+  properties:
+  - name: date_used
+    direction: desc
+
+- kind: RecipeRating
+  ancestor: yes
+
+    
