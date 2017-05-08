@@ -7,284 +7,191 @@ from google.appengine.api import memcache
 import requests
 
 from src.common import chef, eater, food, pantry, account
-from src.chat.utils import SessionManager
+import src.chat.utils as utils
 
-# Messenger API parameters
-FB_PAGE_TOKEN = 'EAAZARTX4JpZAsBAIUtyTwxirZBwB8iU5OqxKt37iSsvIyd6bieEXIAWDc847ym6uklRx3n5ZBKZAfFa3SdDxnXvGZCyr7Dewyj1cTuFistlVg7Qv0NTxpW9MhEi0f4BZAbLZAaNbsXiOZAYGIYi0GxDTpVVmfrwlnrLaCEQ3yHpzZA8QZDZD'
-FB_APP_ID = '1778243129157019'
-# A user secret to verify webhook get request.
-FB_VERIFY_TOKEN = 'chef-ai-is-alive'
 GOOG_API_KEY = 'AIzaSyBSocxmGzZUCgMMHB2gt53OVenv2TUwric'
 
-session_manager = SessionManager()
+LBS_KG = 0.454
 
-def get_memcache_data(session_id):
-    data = memcache.get('{}.data'.format(session_id))
-    if data is None:
-        return {}
-    return data
+def signup(request):
+    logging.info('Action: signup')
+    session_id = request['sessionId']
+    id_type, src_id = utils.get_source_id(request)
+    params = request['result']['parameters']
+    first_name = params['first_name']
+    last_name = params['last_name']
+    email = params['email']
+    raw_address = params['address']
+    weight_amt = params['weight']['amount']
+    weight_unit = params['weight']['amount']
+    goal_weight_amt = params['goal_weight']['amount']
+    goal_weight_unit = params['goal_weight']['unit']
 
-def set_memcache_data(session_id, data, time=60 * 5):
-    memcache.set('{}.data'.format(session_id), data, time)
+    # Preprocess before creating objects
+    first_name = first_name.capitalize()
+    last_name = last_name.capitalize()
 
-def first_entity_value(entities, entity):
-    """
-    Returns first entity value
-    """
-    if entity not in entities:
-        return None
-    val = entities[entity][0]['value']
-    if not val:
-        return None
-    return val['value'] if isinstance(val, dict) else val
-
-def get_list_entity_values(entities, entity):
-    """
-    Returns list of entity values
-    """
-    if entity not in entities:
-        return None
-    vals = [item['value'] for item in entities[entity]]
-    if not vals:
-        return None
-    if isinstance(vals[0], dict):
-        return [val['value'] for val in vals]
-    else:
-        return vals
-
-def parse_wit_msg(request):
-    logging.info('Incoming request:')
-    logging.info(request)
-    text = request['text']
-    context = request['context']
-    entities = request['entities']
-    session_id = request['session_id']
-    return text, context, entities, session_id
-
-
-def fb_message(sender_id, text):
-    """
-    Function for returning response to messenger
-    """
-    data = {
-        'recipient': {'id': sender_id},
-        'message': {'text': text}
-    }
-    # Setup the query string with your PAGE TOKEN
-    qs = 'access_token=' + FB_PAGE_TOKEN
-    # Send POST request to messenger
-    resp = requests.post('https://graph.facebook.com/me/messages?' + qs,
-                         json=data)
-    return resp.content
-
-def send(request, response):
-    """
-    Sender function
-    """
-    # We use the fb_id as equal to session_id
-    logging.info('Wit action: send')
-    text, context, entities, session_id = parse_wit_msg(request)
-    
-    # send message
-    logging.info('Sending: ' + response['text'])
-    logging.info(response)
-    fb_message(session_manager.fb_id(), response['text'])
-
-def create_account(request):
-    logging.info('Wit action: create_account_update_name')
-    text, context, entities, session_id = parse_wit_msg(request)
-    data = get_memcache_data(session_id)
-
-    name = first_entity_value(entities, 'contact')
-    if not name:
-        context['missing_name'] = True
-        context.pop('name', None)
-        return context
-    acct = account.Account(name=name,
-                           fb_id=session_manager.fb_id())
-    acct_key = acct.put()
-    context['name'] = name
-    context.pop('missing_name', None)
-    data['acct_key'] = acct_key.urlsafe()
-    data['name'] = name
-    set_memcache_data(session_id, data)
-    return context
-
-def create_pantry(request):
-    logging.info('Wit action: create_pantry')
-    text, context, entities, session_id = parse_wit_msg(request)
-    data = get_memcache_data(session_id)
-
+    # Get address
     gmaps = googlemaps.Client(key=GOOG_API_KEY)
-
-    try:
-        logging.info('text: ' + text)
-        results = gmaps.geocode(text)
-        logging.info(results)
-        geocode_result = results[0]
-    except:
-        context['missing_address'] = True
-        context.pop('address', None)
-        return context
-
+    address_results = gmaps.geocode(raw_address)
+    logging.info(address_results)
+    geocode_result = address_results[0]
     address = geocode_result['formatted_address']
     coords = geocode_result['geometry']['location']
     timezone = gmaps.timezone((coords['lat'], coords['lng']))['timeZoneId']
 
-    context['address'] = address
-    acct_key = data['acct_key']
-    p = pantry.Pantry(parent=ndb.Key(urlsafe=acct_key),
-                      address=address, timezone=timezone)
-    pantry_key = p.put()
-    data['pantry_key'] = pantry_key.urlsafe()
-    context.pop('missing_address', None)
-    set_memcache_data(session_id, data)
-    return context
+    # Convert weights if necessary
+    if weight_unit == 'lb':
+        weight_amt = weight_amt * LBS_KG
+    if goal_weight_unit == 'lb':
+        goal_weight_amt = goal_weight_amt * LBS_KG
 
-def create_eater_weight(request):
-    logging.info('Wit action: create_eater_weight')
-    text, context, entities, session_id = parse_wit_msg(request)
-    data = get_memcache_data(session_id)
+    acct = account.Account(first_name=first_name,
+                           last_name=last_name, email=email)
+    if id_type == 'fb_id':
+        acct.fb_id = src_id
+    logging.info('Account created')
 
-    weight = first_entity_value(entities, 'number')
-    if not weight:
-        context['missing_weight'] = True
-        context.pop('weight', None)
-        return context
+    p = pantry.Pantry(parent=acct.key, address=address, timezone=timezone)
+    logging.info('Pantry created')
+    pantry_id = ndb.Model.allocate_ids(size=1, parent=acct.key)[0]
+    pantry.key = ndb.Key(pantry.Pantry, pantry_id)
 
-    context['weight'] = weight
-    context.pop('missing_weight', None)
-    data['weight'] = weight
-    set_memcache_data(session_id, data)
-    return context
+    e = eater.Eater(parent=acct.key,
+                    pantry=pantry.key,
+                    first_name=first_name, last_name=last_name,
+                    goal_weight=goal_weight_amt, lift_days=[0, 2, 4])
+    if id_type == 'fb_id':
+        acct.fb_id = src_id
+    logging.info('Eater created')
+    e.set_weight(weight_amt)
+    e.set_default_goal()
+    ndb.put_multi([acct, p, e])
+    logging.info('Entities saved')
 
-def create_eater_goal_weight(request):
-    logging.info('Wit action: create_eater_goal_weight')
-    text, context, entities, session_id = parse_wit_msg(request)
-    data = get_memcache_data(session_id)
+    # Cache session id : entity keys for easy lookup in subsequent requests
+    utils.cache_entities(session_id, account=acct, eater=e, pantry=p)
 
-    goal_weight = first_entity_value(entities, 'number')
-    logging.info('goal wt is %s' % goal_weight)
-    if not goal_weight:
-        context['missing_goal_weight'] = True
-        context.pop('goal_weight', None)
-        return context
+    return utils.apiai_response(
+        request,
+        displayText=("Congrats! Your account is all set and you are ready"
+                     " to go! I've taken the liberty of assuming that if "
+                     "you do any weightlifting, you do it three times per "
+                     "week on Monday, Wednesday and Friday. Deal with it "
+                     "(for now ;-) Now, if there are any foods you dislike"
+                     " or if you're on any special diet, e.g. vegan, let "
+                     "me know so I can better pick recipes you'll love!"))
 
-    context['goal_weight'] = goal_weight
-    context.pop('missing_goal_weight', None)
-    data['goal_weight'] = goal_weight
-    set_memcache_data(session_id, data)
-    return context
 
-def create_eater_dislikes(request):
-    logging.info('Wit action: create_eater_dislikes')
-    text, context, entities, session_id = parse_wit_msg(request)
-    data = get_memcache_data(session_id)
+def add_dislikes(request):
+    pass
 
-    dislikes = get_list_entity_values(entities, 'product')
-    if not dislikes:
-        data['dislikes'] = []
-        context['dislikes_text'] = 'nothing'
-        return context
+def add_diet():
+    pass
 
-    data['dislikes'] = dislikes
-    context['dislikes_text'] = ', '.join(dislikes)
-    set_memcache_data(session_id, data)
-    return context
+def add_meal(request):
+    logging.info('Action: add_meal')
+    session_id = request['sessionId']
+    cached_entities = utils.get_cached_entities(session_id)
+    e = cached_entities.get('eater')
+    if e is None:
+        id_type, src_id = utils.get_source_id(session_id)
+        if id_type == 'fb_id':
+            e = eater.Eater.query(eater.Eater.fb_id == src_id).fetch(1)[0]
 
-def create_eater_diet(request):
-    logging.info('Wit action: create_eater_diet')
-    text, context, entities, session_id = parse_wit_msg(request)
-    data = get_memcache_data(session_id)
+    params = request['result']['parameters']
+    protein = params.get('protein')
+    if protein is None:
+        protein = 0
+    carb = params.get('carb')
+    if carb is None:
+        carb = 0
+    fat = params.get('fat')
+    if fat is None:
+        fat = 0
+    e.add_meal(protein=protein, carb=carb, fat=fat)
 
-    diet = first_entity_value(entities, 'diet')
-    if not diet:
-        context['diet_text'] = 'standard'
-        data['diet'] = None
-        return context
+    utils.cache_entities(session_id, eater=e)
 
-    data['diet'] = diet
-    context['diet_text'] = diet
-    set_memcache_data(session_id, data)
-    return context
+    return utils.apiai_response(
+        request,
+        displayText=("Done, added successfully!"))
 
-def create_eater(request):
-    logging.info('Wit action: create_eater')
-    text, context, entities, session_id = parse_wit_msg(request)
-    data = get_memcache_data(session_id)
 
-    #try:
-    e = eater.Eater(id=fb_id, fb_id=session_manager.fb_id(),
-                    parent=ndb.Key(urlsafe=data['acct_key']),
-                    pantry=ndb.Key(urlsafe=data['pantry_key']),
-                    name=data['name'], goal_weight=data['goal_weight'],
-                    lift_days=[0, 2, 4])
 
-    e.set_weight(context['weight'])
+# def create_eater_dislikes(request):
+#     logging.info('Wit action: create_eater_dislikes')
+#     text, context, entities, session_id = parse_wit_msg(request)
+#     data = get_memcache_data(session_id)
 
-    if 'diet' in data:
-        e.diet = data['diet']
-    if 'dislikes' in data:
-        e.dislikes = data['dislikes']
+#     dislikes = get_list_entity_values(entities, 'product')
+#     if not dislikes:
+#         data['dislikes'] = []
+#         context['dislikes_text'] = 'nothing'
+#         return context
 
-    try:
-        e.set_default_goal()
-        e.put()
-        session_manager.end_session()
-        # nutrition = e.get_remaining_nutrition()
-        # context['cals'] = nutrition['cals']
-        # context['protein'] = nutrition['protein']
-        # context['carb'] = nutrition['carb']
-        # context['fat'] = nutrition['fat']
-        context.pop('account_creation_failure', None)
-    except:
-        context['account_creation_failure'] = True
+#     data['dislikes'] = dislikes
+#     context['dislikes_text'] = ', '.join(dislikes)
+#     set_memcache_data(session_id, data)
+#     return context
 
-    set_memcache_data(session_id, data)
-    return context
+# def create_eater_diet(request):
+#     logging.info('Wit action: create_eater_diet')
+#     text, context, entities, session_id = parse_wit_msg(request)
+#     data = get_memcache_data(session_id)
+
+#     diet = first_entity_value(entities, 'diet')
+#     if not diet:
+#         context['diet_text'] = 'standard'
+#         data['diet'] = None
+#         return context
+
+#     data['diet'] = diet
+#     context['diet_text'] = diet
+#     set_memcache_data(session_id, data)
+#     return context
 
 def get_remaining_nutrition(request):
-    logging.info('Wit action: get_remaining_nutrition')
-    text, context, entities, session_id = parse_wit_msg(request)
+    logging.info('Action: get_remaining_nutrition')
+    session_id = request['sessionId']
+    cached_entities = utils.get_cached_entities(session_id)
+    e = cached_entities.get('eater')
+    if e is None:
+        id_type, src_id = utils.get_source_id(session_id)
+        if id_type == 'fb_id':
+            e = eater.Eater.query(eater.Eater.fb_id == src_id).fetch(1)[0]
 
-    fb_id = session_manager.fb_id()
-    e = eater.Eater.query(eater.Eater.fb_id == fb_id).fetch(1)[0]
     nut = e.get_remaining_nutrition()
-    context['cals'] = nut['cals']
-    context['protein'] = nut['protein']
-    context['carb'] = nut['carb']
-    context['fat'] = nut['fat']
-    context['fiber'] = nut['fiber']
-    context['sodium'] = nut['sodium']
-    session_manager.end_session()
 
-    logging.info('outgoing context:')
-    logging.info(context)
-    return context
+    response = ("You have {} remaining calories. You need {} more grams of "
+                "protein to hit your target, and you have {} grams of carbs "
+                " and {} grams of fat remaining in your budget today. "
+                "I also recommended an additional {} grams of fiber and no more"
+                " than {} milligrams of sodium.").format(
+                    nut['cals'], nut['protein'], nut['carb'],
+                    nut['fat'], nut['fiber'], nut['sodium'])
 
-def clear_context(request):
-    logging.info('Clearing context')
-    session_manager.end_session()
-    return {'context_cleared': True}
+    utils.cache_entities(session_id, eater=e)
 
-ACTIONS= {
-    'send': send,
+    return utils.apiai_response(request, displayText=response)
+
+actions = {
     # 'use_pantry_item': create_account,
-    # 'add_meal': create_account,
+     'add_meal': add_meal,
     # 'get_recipe_instructions': create_account,
     'get_remaining_nutrition': get_remaining_nutrition,
     # 'add_pantry_item': create_account,
     # 'get_recipe_options': create_account,
     # 'use_recipe_ingredients': create_account,
     # 'get_recipe': create_account,
-    'create_account': create_account,
-    'create_pantry': create_pantry,
-    'create_eater_weight': create_eater_weight,
-    'create_eater_goal_weight': create_eater_goal_weight,
-    'create_eater_dislikes': create_eater_dislikes,
-    'create_eater_diet': create_eater_diet,
-    'create_eater': create_eater,
-    'clear_context': clear_context
+    # 'create_account': create_account,
+    # 'create_pantry': create_pantry,
+    # 'create_eater_weight': create_eater_weight,
+    # 'create_eater_goal_weight': create_eater_goal_weight,
+    # 'create_eater_dislikes': create_eater_dislikes,
+    # 'create_eater_diet': create_eater_diet,
+    # 'create_eater': create_eater
+    'signup': signup
 }
 
 

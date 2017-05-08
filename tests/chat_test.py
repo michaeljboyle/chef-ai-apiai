@@ -14,6 +14,7 @@
 
 # [START imports]
 import unittest
+import mock
 
 from google.appengine.api import memcache
 from google.appengine.ext import ndb
@@ -21,7 +22,7 @@ from google.appengine.ext import testbed
 
 from src.chat import chat
 from src.common import eater
-from src.chat.utils import SessionManager
+import src.chat.utils as utils
 
 import datetime
 # [END imports]
@@ -51,59 +52,82 @@ class ChatTestCase(unittest.TestCase):
         self.testbed.deactivate()
     # [END eater_teardown]
 
-    def test_utils_session_manager(self):
-        fb_id = 'abc'
-        t1 = '123'
-        t2 = '456'
+    def test_utils_apiai_response(self):
+        # test defaults
+        r = utils.apiai_response({}, displayText='test')
+        self.assertEqual('test', r['displayText'])
+        self.assertEqual('test', r['speech'])
+        self.assertEqual(None, r.get('data'))
 
-        sm = SessionManager()
-        sid = sm.open_session(fb_id, t1)
-        self.assertEqual('abc.123', sid)
-        self.assertEqual('abc', sm.fb_id())
-        self.assertEqual('123', sm.timestamp())
-        self.assertEqual('abc.123', sm.session_id())
-        # Check caching works
-        sid = sm.open_session(fb_id, t2)
-        self.assertEqual('abc.123', sid)
-        self.assertEqual('123', sm.timestamp())
-        # Test end_session uncaches
-        sm.end_session()
-        sid = sm.open_session(fb_id, t2)
-        self.assertEqual('abc.456', sid)
+        # Test setting
+        r = utils.apiai_response({}, displayText='test', speech='test2',
+                           data={'a': 1})
+        self.assertEqual(1, r.get('data').get('a'))
 
-    def test_chat_get_remaining_nutrition(self):
-        request = {
-            'session_id': 'abc.123',
-            'text': '',
-            'context': {},
-            'entities': {}
+    def test_utils_get_source_id(self):
+        # test defaults
+        r = {
+                'originalRequest': {
+                    'source': 'facebook',
+                    'data': {
+                        'sender': {
+                            'id': 123
+                        }
+                    }
+                }
         }
-        e = eater.Eater(parent=ndb.Key('Account', 9), id='abc', fb_id='abc')
-        e.nutrition_plans = [eater.NutritionPlan(protein=2, carb=4, fat=6,
-                                                 cals=78)] * 7
-        def get_remaining_nutrition_patch():
-            return {
-                'cals': 0,
-                'protein': 0,
-                'carb': 0,
-                'fat': 0,
-                'fiber': 0,
-                'sodium': 0
-            }
-        e.get_remaining_nutrition = get_remaining_nutrition_patch
+        id_type, sender_id = utils.get_source_id(r)
+        self.assertEqual('fb_id', id_type)
+        self.assertEqual(123, sender_id)
+
+    def test_utils_make_memcache_key(self):
+        self.assertEqual('123.entities', utils._make_memcache_key('123'))
+
+    @mock.patch('src.chat.utils._make_memcache_key')
+    def test_utils_get_cached_entities(self, mock_memcache_key_maker):
+        memcache.set('123.entities.account', 'abc')
+        mock_memcache_key_maker.return_value = '123.entities'
+        self.assertEqual('abc', utils.get_cached_entities('123').get('account'))
+        mock_memcache_key_maker.assert_called_with('123')
+
+    @mock.patch('src.chat.utils._make_memcache_key')
+    def test_utils_cache_entities(self, mock_memcache_key_maker):
+        mock_memcache_key_maker.return_value = '123.entities'
+        utils.cache_entities('123', account='a', eater='b', pantry='c')
+        mock_memcache_key_maker.assert_called_with('123')
+        account = memcache.get('123.entities.account')
+        eater = memcache.get('123.entities.eater')
+        pantry = memcache.get('123.entities.pantry')
+        self.assertEqual('a', account)
+        self.assertEqual('b', eater)
+        self.assertEqual('c', pantry)
+
+    @mock.patch('src.chat.utils.get_cached_entities')
+    @mock.patch('src.chat.utils.get_source_id')
+    @mock.patch.object(eater.Eater, 'get_remaining_nutrition')
+    def test_chat_get_remaining_nutrition(self, mock_get_remaining_nutrition,
+                                          mock_get_source_id,
+                                          mock_get_cached_entities):
+        mock_get_cached_entities.return_value = {}
+        mock_get_source_id.return_value = ('fb_id', '123')
+        # Check queries for entity when none cached
+        request = {'sessionId': 'abc123'}
+        e = eater.Eater(fb_id='123')
         e.put()
-        context = chat.get_remaining_nutrition(request)
-        self.assertEqual(0, context['cals'])
-        self.assertTrue(context['complete'])
+        response = chat.get_remaining_nutrition(request)
+        mock_get_remaining_nutrition.assert_called()
+        self.assertEquals('You have', response['displayText'][:8])
 
-        # rec = eater.NutritionRecord(parent=e.key, protein=0, carb=1, fat=2)
-        # rec.put()
-        # nut = e.get_remaining_nutrition()
-        # self.assertEqual(2, nut['protein'])
-        # self.assertEqual(3, nut['carb'])
-        # self.assertEqual(4, nut['fat'])
-        # self.assertEqual(56, nut['cals'])
+        # Now test value returned from memcache
+        e = eater.Eater(fb_id='456')
+        e.put()
+        mock_get_cached_entities.return_value = {'eater': e}
+        mock_get_source_id.return_value = ('fb_id', '456')
+        response = chat.get_remaining_nutrition(request)
+        mock_get_remaining_nutrition.assert_called()
 
+        # Check in actions
+        self.assertTrue('get_remaining_nutrition' in chat.actions)
 
 
 # [START main]

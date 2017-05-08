@@ -18,82 +18,40 @@ from datetime import datetime
 
 from google.appengine.api import memcache
 
-from wit import Wit
-
 from src.chat import chat
+from src.chat.utils import apiai_response
 
-from flask import Flask, request
-
-# Wit.ai parameters
-WIT_TOKEN = 'A5AQ6CLPTXEBFXAD7YMR3Y7QIVWORCWQ'
-
+from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
-# Facebook messenger GET webhook
-@app.route('/webhook', methods=['GET'])
-def messenger_get():
-    """
-    A webhook to return a challenge
-    """
-    logging.info('Messenger GET webhook')
-    logging.info(request.form)
-    verify_token = request.args.get('hub.verify_token', '')
-    # check whether the verify tokens match
-    if verify_token == FB_VERIFY_TOKEN:
-        # respond with the challenge to confirm
-        return request.args.get('hub.challenge', '')
-    else:
-        return 'Invalid Request or Verification Token'
-
-# Facebook messenger POST webhook
-@app.route('/webhook', methods=['POST'])
-def messenger_post():
+# API AI POST webhook
+@app.route('/apiai-webhook', methods=['POST'])
+def apiai_post():
     """
     Handler for webhook (currently for postback and messages)
     """
     data = request.get_json()
-    logging.info('Messenger POST webhook')
+    logging.info('APIAI POST webhook')
     logging.info(data)
-    if data['object'] == 'page':
-        for entry in data['entry']:
-            # get all the messages
-            messages = entry['messaging']
-            if messages[0]:
-                # Get the first message
-                message = messages[0]
-                # Yay! We got a new message!
-                # We retrieve the Facebook user ID of the sender
-                fb_id = message['sender']['id']
-                timestamp = message['timestamp']
-                # Check if there is an ongoing convo with this fb_id, or gen new
-                sm = chat.session_manager
-                session_id = sm.open_session(fb_id, timestamp)
-                
-                # Retrieve cached context
-                memcache_key = '{}.context'.format(session_id)
-                context = memcache.get(memcache_key)
-                if context is None:
-                    context = {}
-                # We retrieve the message content
-                text = message['message']['text']
-                logging.info('Messenger message text: %s' % text)
-                # Let's forward the message to the Wit.ai Bot Engine
-                # We handle the response in the function send()
-                context = client.run_actions(session_id=session_id,
-                                             context=context, 
-                                             message=text,
-                                             max_steps=10)
-                # Cache context for 5 minutes
-                logging.info('Caching context')
-                logging.info(context)
-                set_ok = memcache.set(memcache_key, context, 60 * 5)
-                if not set_ok:
-                    logging.error('Memcache failed to set context')
-    else:
-        # Returned another event
-        return 'Received Different Event'
-    return ''
+    if 'result' in data:
+        result = data['result']
+        
+        # We retrieve the message content
+        text = result['resolvedQuery']
+        logging.info('Message text: %s' % text)
+        # Let's forward the message to the action handler
+        if 'action' in result and not result.get('actionIncomplete'):
+            action = result['action']
+            logging.info('Action is: %s' % action)
+            if action in chat.actions:
+                response = chat.actions[action](data)
+                logging.info('Action response:')
+                logging.info(response)
+                return jsonify(response)
+            else:
+                logging.error('Action %s not in actions' % action)
+
 
 @app.errorhandler(500)
 def server_error(e):
@@ -101,6 +59,3 @@ def server_error(e):
     logging.exception('An error occurred during a request.')
     return 'An internal error occurred.', 500
 # [END app]
-
-# Setup Wit Client
-client = Wit(access_token=WIT_TOKEN, actions=chat.ACTIONS, logger=logging)

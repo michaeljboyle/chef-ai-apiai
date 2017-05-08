@@ -71,7 +71,8 @@ class EaterTestCase(unittest.TestCase):
     # [START eater_insert]
     def test_eater_insert(self):
         e = eater.Eater(parent=ndb.Key('Account', 1),
-                        pantry=ndb.Key('Pantry', 2), name='test',
+                        pantry=ndb.Key('Pantry', 2), first_name='first',
+                        last_name='last',
                         goal_weight=10.0, lift_days=[0,1,2],
                         dislikes=['farts'], diet='paleo')
         e.put()
@@ -112,7 +113,8 @@ class EaterTestCase(unittest.TestCase):
 
     def test_eater_set_default_goal(self):
         e = eater.Eater(parent=ndb.Key('Account', 1),
-                        pantry=ndb.Key('Pantry', 2), name='test',
+                        pantry=ndb.Key('Pantry', 2), first_name='first',
+                        last_name='last',
                         goal_weight=10.0, lift_days=[0],
                         dislikes=['farts'], diet='paleo')
         e.put()
@@ -180,7 +182,7 @@ class EaterTestCase(unittest.TestCase):
         self.assertEqual(1, hx_rec.protein)
 
         # Now make this an old record from 1 day ago, should return a new rec
-        rec.date = datetime.datetime.now() - datetime.timedelta(days=1)
+        rec.date = datetime.datetime.now().date() - datetime.timedelta(days=1)
         rec.put()
         hx_rec = e.get_nutrition_today()
         self.assertEqual(0, hx_rec.protein)
@@ -219,85 +221,6 @@ class EaterTestCase(unittest.TestCase):
         self.assertEqual(3, nut['carb'])
         self.assertEqual(4, nut['fat'])
         self.assertEqual(56, nut['cals'])
-
-    # root = TestEntityGroupRoot(id="root")
-    # TestModel(parent=root.key).put()
-    # TestModel(number=17, parent=root.key).put()
-    # query = TestModel.query(ancestor=root.key).filter(
-    #     TestModel.number == 42)
-    # results = query.fetch(2)
-    # self.assertEqual(1, len(results))
-    # self.assertEqual(42, results[0].number)
-
-    # # [START datastore_example_memcache]
-    # def testGetEntityViaMemcache(self):
-    #     entity_key = TestModel(number=18).put().urlsafe()
-    #     retrieved_entity = GetEntityViaMemcache(entity_key)
-    #     self.assertNotEqual(None, retrieved_entity)
-    #     self.assertEqual(18, retrieved_entity.number)
-    # # [END datastore_example_memcache]
-
-
-# [START HRD_example_1]
-# from google.appengine.datastore import datastore_stub_util  # noqa
-
-
-# class HighReplicationTestCaseOne(unittest.TestCase):
-
-#     def setUp(self):
-#         # First, create an instance of the Testbed class.
-#         self.testbed = testbed.Testbed()
-#         # Then activate the testbed, which prepares the service stubs for use.
-#         self.testbed.activate()
-#         # Create a consistency policy that will simulate the High Replication
-#         # consistency model.
-#         self.policy = datastore_stub_util.PseudoRandomHRConsistencyPolicy(
-#             probability=0)
-#         # Initialize the datastore stub with this policy.
-#         self.testbed.init_datastore_v3_stub(consistency_policy=self.policy)
-#         # Initialize memcache stub too, since ndb also uses memcache
-#         self.testbed.init_memcache_stub()
-#         # Clear in-context cache before each test.
-#         ndb.get_context().clear_cache()
-
-#     def tearDown(self):
-#         self.testbed.deactivate()
-
-#     def testEventuallyConsistentGlobalQueryResult(self):
-#         class TestModel(ndb.Model):
-#             pass
-
-#         user_key = ndb.Key('User', 'ryan')
-
-#         # Put two entities
-#         ndb.put_multi([
-#             TestModel(parent=user_key),
-#             TestModel(parent=user_key)
-#         ])
-
-#         # Global query doesn't see the data.
-#         self.assertEqual(0, TestModel.query().count(3))
-#         # Ancestor query does see the data.
-#         self.assertEqual(2, TestModel.query(ancestor=user_key).count(3))
-# # [END HRD_example_1]
-
-#     # [START HRD_example_2]
-#     def testDeterministicOutcome(self):
-#         # 50% chance to apply.
-#         self.policy.SetProbability(.5)
-#         # Use the pseudo random sequence derived from seed=2.
-#         self.policy.SetSeed(2)
-
-#         class TestModel(ndb.Model):
-#             pass
-
-#         TestModel().put()
-
-#         self.assertEqual(0, TestModel.query().count(3))
-#         self.assertEqual(0, TestModel.query().count(3))
-#         # Will always be applied before the third query.
-#         self.assertEqual(1, TestModel.query().count(3))
-#     # [END HRD_example_2]
 
 
 # [START main]

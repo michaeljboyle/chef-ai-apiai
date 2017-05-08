@@ -57,13 +57,14 @@ class Eater(EndpointsModel):
 
     # Special part to specific protorpc fields
     
-    _message_fields_schema = ('id', 'parent', 'name', 'goal_weight',
-                              'lift_days', 'dislikes', 'diet') 
+    _message_fields_schema = ('id', 'parent', 'first_name', 'last_name',
+                              'goal_weight', 'lift_days', 'dislikes', 'diet') 
     
     date_created = ndb.DateTimeProperty(auto_now_add=True)
     fb_id = ndb.StringProperty()
     pantry = ndb.KeyProperty(kind=Pantry)
-    name = ndb.StringProperty()
+    first_name = ndb.StringProperty()
+    last_name = ndb.StringProperty()
     weight = ndb.StructuredProperty(Weight)
     goal_weight = ndb.FloatProperty()
     lift_days = ndb.IntegerProperty(repeated=True, choices=range(7))
@@ -100,11 +101,13 @@ class Eater(EndpointsModel):
     def get_nutrition_today(self):
         most_recent = self.get_nutrition_hx(1)
         # # Must offset UTC date to local
-        offset = datetime.timedelta(seconds=-time.timezone)
-        if len(most_recent) > 0:
-            raise ValueError('record date was {}. system date is {}'.format(most_recent[0].date, datetime.datetime.now()))
-        if (most_recent and 
-            most_recent[0].date + offset == datetime.datetime.now().date()):
+        offset = datetime.timedelta(seconds=time.timezone)
+
+        # if len(most_recent) > 0:
+        #     now = datetime.datetime.now()
+        #     raise ValueError('record date was {}. system date is {}, offset date is {}'.format(most_recent[0].date, now, most_recent[0].date + offset))
+        if (most_recent and
+            most_recent[0].date == (datetime.datetime.now() + offset).date()):
             return most_recent[0]
         else:
             rec = NutritionRecord(parent=self.key)
@@ -193,11 +196,11 @@ class Eater(EndpointsModel):
     def add_meal(self, protein=0, carb=0, fat=0, sodium=0, fiber=0,
                  date=None):
         nut_today = self.get_nutrition_today()
-        nut_today.protein += protein
-        nut_today.carb += carb
-        nut_today.fat += fat
-        nut_today.sodium += sodium
-        nut_today.fiber += fiber
+        nut_today.protein += int(protein)
+        nut_today.carb += int(carb)
+        nut_today.fat += int(fat)
+        nut_today.sodium += int(sodium)
+        nut_today.fiber += int(fiber)
         nut_today.put()
 
     def rate_recipe(self, recipe_ident, rating, date):

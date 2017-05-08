@@ -1,28 +1,62 @@
 from google.appengine.api import memcache
 
-# class SessionId(object):
-    
-#     def __init__(self, fb_id=None, t=None):
-#         self._fb_id = fb_id
-#         self._timestamp = t
+def apiai_response(request, displayText='', speech=None, data=None,
+                   contextOut=None, followupEvent=None,
+                   source='chef-ai-apiai-webhook'):
+    if speech is None:
+        speech = displayText
 
-#     def fb_id(self):
-#         return self._fb_id
+    j = {
+        'displayText': displayText,
+        'speech': speech,
+        'source': source
+    }
+    if data:
+        j['data'] = data
+    if contextOut:
+        j['contextOut'] = contextOut
+    if followupEvent:
+        j['followupEvent'] = followupEvent
 
-#     def timestamp(self):
-#         return self._timestamp
+    # if request.get('originalRequest').get('source') == 'facebook':
+    #     msg = request.get('originalRequest')
+    #     sender_id = msg['data']['sender']['id']
+    #     fb_response = {
+    #         'recipient': {'id': sender_id},
+    #         'message': {'text': displayText}
+    #     }
+    #     j['data']['facebook'] = fb_response
 
-#     def get(self):
-#         return '{}.{}'.format(self._fb_id, self._timestamp)
+    return j
 
-#     def key(self):
-#         return '{}.session_id'.format(self._fb_id)
 
-    # def from_string(self, s):
-    #     [f, t] = s.split('.')
-    #     self._fb_id = f
-    #     self._timestamp = t
-    #     return self
+def get_source_id(request):
+    src = request.get('originalRequest').get('source')
+    if src == 'facebook':
+        id_type = 'fb_id'
+        sender_id = request.get(
+            'originalRequest').get('data').get('sender').get('id')
+    return id_type, sender_id
+
+def _make_memcache_key(session_id):
+    return '{}.{}'.format(session_id, 'entities')
+
+def get_cached_entities(session_id):
+    key_root = _make_memcache_key(session_id)
+    account = memcache.get('{}.{}'.format(key_root, 'account'))
+    eater = memcache.get('{}.{}'.format(key_root, 'eater'))
+    pantry = memcache.get('{}.{}'.format(key_root, 'pantry'))
+    return {'account': account, 'eater': eater, 'pantry': pantry}
+
+def cache_entities(session_id, account=None, eater=None, pantry=None):
+    key_root = _make_memcache_key(session_id)
+    if account:
+        memcache.set('{}.{}'.format(key_root, 'account'), account, time=3600)
+    if eater:
+        memcache.set('{}.{}'.format(key_root, 'eater'), eater, time=3600)
+    if pantry:
+        memcache.set('{}.{}'.format(key_root, 'pantry'), pantry, time=3600)
+
 
 class SessionManager(object):
 
