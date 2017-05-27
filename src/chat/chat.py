@@ -2,16 +2,14 @@ import logging
 import googlemaps
 
 from google.appengine.ext import ndb
-from google.appengine.api import memcache
 
-import requests
-
-from src.common import chef, eater, food, pantry, account
+from src.common import eater, pantry, account
 import src.chat.utils as utils
 
 GOOG_API_KEY = 'AIzaSyBSocxmGzZUCgMMHB2gt53OVenv2TUwric'
 
 LBS_KG = 0.454
+
 
 def signup(request):
     logging.info('Action: signup')
@@ -62,7 +60,7 @@ def signup(request):
                     first_name=first_name, last_name=last_name,
                     goal_weight=goal_weight_amt, lift_days=[0, 2, 4])
     if id_type == 'fb_id':
-        acct.fb_id = src_id
+        e.fb_id = src_id
     logging.info('Eater created')
     e.set_weight(weight_amt)
     e.set_default_goal()
@@ -86,8 +84,10 @@ def signup(request):
 def add_dislikes(request):
     pass
 
+
 def add_diet():
     pass
+
 
 def add_meal(request):
     logging.info('Action: add_meal')
@@ -116,8 +116,6 @@ def add_meal(request):
     return utils.apiai_response(
         request,
         displayText=("Done, added successfully!"))
-
-
 
 # def create_eater_dislikes(request):
 #     logging.info('Wit action: create_eater_dislikes')
@@ -151,13 +149,14 @@ def add_meal(request):
 #     set_memcache_data(session_id, data)
 #     return context
 
+
 def get_remaining_nutrition(request):
     logging.info('Action: get_remaining_nutrition')
     session_id = request['sessionId']
     cached_entities = utils.get_cached_entities(session_id)
     e = cached_entities.get('eater')
     if e is None:
-        id_type, src_id = utils.get_source_id(session_id)
+        id_type, src_id = utils.get_source_id(request)
         if id_type == 'fb_id':
             e = eater.Eater.query(eater.Eater.fb_id == src_id).fetch(1)[0]
 
@@ -166,8 +165,8 @@ def get_remaining_nutrition(request):
     response = ("You have {} remaining calories. You need {} more grams of "
                 "protein to hit your target, and you have {} grams of carbs "
                 " and {} grams of fat remaining in your budget today. "
-                "I also recommended an additional {} grams of fiber and no more"
-                " than {} milligrams of sodium.").format(
+                "I also recommended an additional {} grams of fiber and no "
+                "more than {} milligrams of sodium.").format(
                     nut['cals'], nut['protein'], nut['carb'],
                     nut['fat'], nut['fiber'], nut['sodium'])
 
@@ -177,7 +176,7 @@ def get_remaining_nutrition(request):
 
 actions = {
     # 'use_pantry_item': create_account,
-     'add_meal': add_meal,
+    'add_meal': add_meal,
     # 'get_recipe_instructions': create_account,
     'get_remaining_nutrition': get_remaining_nutrition,
     # 'add_pantry_item': create_account,
@@ -193,5 +192,3 @@ actions = {
     # 'create_eater': create_eater
     'signup': signup
 }
-
-

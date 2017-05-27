@@ -1,4 +1,6 @@
+import logging
 from google.appengine.api import memcache
+
 
 def apiai_response(request, displayText='', speech=None, data=None,
                    contextOut=None, followupEvent=None,
@@ -31,6 +33,8 @@ def apiai_response(request, displayText='', speech=None, data=None,
 
 
 def get_source_id(request):
+    logging.info('OR:')
+    logging.info(request.get('originalRequest'))
     src = request.get('originalRequest').get('source')
     if src == 'facebook':
         id_type = 'fb_id'
@@ -38,8 +42,10 @@ def get_source_id(request):
             'originalRequest').get('data').get('sender').get('id')
     return id_type, sender_id
 
+
 def _make_memcache_key(session_id):
     return '{}.{}'.format(session_id, 'entities')
+
 
 def get_cached_entities(session_id):
     key_root = _make_memcache_key(session_id)
@@ -47,6 +53,7 @@ def get_cached_entities(session_id):
     eater = memcache.get('{}.{}'.format(key_root, 'eater'))
     pantry = memcache.get('{}.{}'.format(key_root, 'pantry'))
     return {'account': account, 'eater': eater, 'pantry': pantry}
+
 
 def cache_entities(session_id, account=None, eater=None, pantry=None):
     key_root = _make_memcache_key(session_id)
