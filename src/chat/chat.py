@@ -5,6 +5,7 @@ from google.appengine.ext import ndb
 
 from src.common import eater, pantry, account
 import src.chat.utils as utils
+import response_text as responses
 
 GOOG_API_KEY = 'AIzaSyBSocxmGzZUCgMMHB2gt53OVenv2TUwric'
 
@@ -70,15 +71,7 @@ def signup(request):
     # Cache session id : entity keys for easy lookup in subsequent requests
     utils.cache_entities(session_id, account=acct, eater=e, pantry=p)
 
-    return utils.apiai_response(
-        request,
-        displayText=("Congrats! Your account is all set and you are ready"
-                     " to go! I've taken the liberty of assuming that if "
-                     "you do any weightlifting, you do it three times per "
-                     "week on Monday, Wednesday and Friday. Deal with it "
-                     "(for now ;-) Now, if there are any foods you dislike"
-                     " or if you're on any special diet, e.g. vegan, let "
-                     "me know so I can better pick recipes you'll love!"))
+    return utils.apiai_response(request, displayText=responses.SIGNUP_SUCCESS)
 
 
 def add_dislikes(request):
@@ -113,9 +106,8 @@ def add_meal(request):
 
     utils.cache_entities(session_id, eater=e)
 
-    return utils.apiai_response(
-        request,
-        displayText=("Done, added successfully!"))
+    return utils.apiai_response(request,
+                                displayText=responses.ADD_MEAL_SUCCESS)
 
 # def create_eater_dislikes(request):
 #     logging.info('Wit action: create_eater_dislikes')
@@ -161,14 +153,7 @@ def get_remaining_nutrition(request):
             e = eater.Eater.query(eater.Eater.fb_id == src_id).fetch(1)[0]
 
     nut = e.get_remaining_nutrition()
-
-    response = ("You have {} remaining calories. You need {} more grams of "
-                "protein to hit your target, and you have {} grams of carbs "
-                " and {} grams of fat remaining in your budget today. "
-                "I also recommended an additional {} grams of fiber and no "
-                "more than {} milligrams of sodium.").format(
-                    nut['cals'], nut['protein'], nut['carb'],
-                    nut['fat'], nut['fiber'], nut['sodium'])
+    response = responses.GET_REMAINING_NUTRITION_SUCCESS.format(n=nut)
 
     utils.cache_entities(session_id, eater=e)
 
