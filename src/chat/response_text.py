@@ -1,7 +1,7 @@
 GET_REMAINING_NUTRITION_SUCCESS = (
     'You have {n[cals]} remaining calories. You need '
     '{n[protein]} more grams of protein to hit your target, and you have '
-    '{n[carb]} grams of carbs and'
+    '{n[carb]} grams of carbs and '
     '{n[fat]} grams of fat '
     'remaining in your budget today. I also recommended an additional '
     '{n[fiber]} grams of fiber and no more than '
