@@ -4,13 +4,15 @@ from endpoints_proto_datastore.ndb import EndpointsModel
 from endpoints_proto_datastore.ndb import EndpointsAliasProperty
 
 from protorpc import messages
+from datetime import timedelta
 
 from account import Account
+
 
 class Food(ndb.Model):
     """A model for representing a food item"""
     name = ndb.StringProperty()
-    spoonacular_id = ndb.StringProperty()
+    spoonacular_id = ndb.IntegerProperty()
     upc = ndb.StringProperty()
     lasts_days = ndb.IntegerProperty()
 
@@ -32,15 +34,16 @@ class PantryItem(ndb.Model):
                               'start_date', 'expiration_date')
     """
     food = ndb.StructuredProperty(Food)
-    initial_quantity = ndb.IntegerProperty()
+    initial_quantity = ndb.FloatProperty()
     initial_quantity_unit = ndb.StringProperty(choices=('g', 'ml'))
     percent_remaining = ndb.IntegerProperty(validator=percent_validator)
-    start_date = ndb.DateProperty()
+    start_date = ndb.DateProperty(auto_now_add=True)
     expiration_date = ndb.DateProperty()
 
-    def set_expiration_date(self, date):
+    def set_expiration_date(self, date=None):
         if not date:
-            self.expiration_date = self.start_date + self.food.lasts_days
+            self.expiration_date = (
+                self.start_date + timedelta(days=self.food.lasts_days))
         else:
             self.expiration_date = date
 

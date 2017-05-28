@@ -3,13 +3,37 @@ import googlemaps
 
 from google.appengine.ext import ndb
 
-from src.common import eater, pantry, account
+from src.common import eater, pantry, account, chef
 import src.chat.utils as utils
-import response_text as responses
+import src.chat.response_text as responses
 
 GOOG_API_KEY = 'AIzaSyBSocxmGzZUCgMMHB2gt53OVenv2TUwric'
 
 LBS_KG = 0.454
+
+
+def get_eater_from_request(request):
+    session_id = request['sessionId']
+    cached_entities = utils.get_cached_entities(session_id)
+    e = cached_entities.get('eater')
+    if e is not None:
+        return e
+    else:
+        id_type, src_id = utils.get_source_id(request)
+        if id_type == 'fb_id':
+            e = eater.Eater.query(eater.Eater.fb_id == src_id).fetch(1)[0]
+            return e
+
+
+def get_pantry_from_request(request):
+    session_id = request['sessionId']
+    cached_entities = utils.get_cached_entities(session_id)
+    p = cached_entities.get('pantry')
+    if p is not None:
+        return p
+    else:
+        e = get_eater_from_request(request)
+        return e.pantry.get()
 
 
 def signup(request):
@@ -84,13 +108,6 @@ def add_diet():
 
 def add_meal(request):
     logging.info('Action: add_meal')
-    session_id = request['sessionId']
-    cached_entities = utils.get_cached_entities(session_id)
-    e = cached_entities.get('eater')
-    if e is None:
-        id_type, src_id = utils.get_source_id(session_id)
-        if id_type == 'fb_id':
-            e = eater.Eater.query(eater.Eater.fb_id == src_id).fetch(1)[0]
 
     params = request['result']['parameters']
     protein = params.get('protein')
@@ -102,9 +119,11 @@ def add_meal(request):
     fat = params.get('fat')
     if fat is None:
         fat = 0
+
+    e = get_eater_from_request(request)
     e.add_meal(protein=protein, carb=carb, fat=fat)
 
-    utils.cache_entities(session_id, eater=e)
+    utils.cache_entities(request['sessionId'], eater=e)
 
     return utils.apiai_response(request,
                                 displayText=responses.ADD_MEAL_SUCCESS)
@@ -144,27 +163,55 @@ def add_meal(request):
 
 def get_remaining_nutrition(request):
     logging.info('Action: get_remaining_nutrition')
-    session_id = request['sessionId']
-    cached_entities = utils.get_cached_entities(session_id)
-    e = cached_entities.get('eater')
-    if e is None:
-        id_type, src_id = utils.get_source_id(request)
-        if id_type == 'fb_id':
-            e = eater.Eater.query(eater.Eater.fb_id == src_id).fetch(1)[0]
 
+    e = get_eater_from_request(request)
     nut = e.get_remaining_nutrition()
+
     response = responses.GET_REMAINING_NUTRITION_SUCCESS.format(n=nut)
 
-    utils.cache_entities(session_id, eater=e)
+    utils.cache_entities(request['sessionId'], eater=e)
 
     return utils.apiai_response(request, displayText=response)
+
+
+def add_pantry_item(request):
+    logging.info('Action: add_pantry_item')
+
+    params = request['result']['parameters']
+    food = params.get('food')
+    if not food:
+        food = None
+    number = params.get('number')
+    if not number:
+        number = None
+    if number is not None:
+        number = int(number)
+    unit_wt = params.get('unit-weight')
+    if unit_wt:
+        weight_amt = unit_wt.get('amount')
+        weight_unit = unit_wt.get('unit')
+    else:
+        weight_amt = None
+        weight_unit = None
+
+    p = get_pantry_from_request(request)
+
+    item = chef.add_pantry_item(p, request.get('result').get('resolvedQuery'),
+                                food=food, number=number,
+                                weight_amt=weight_amt, weight_unit=weight_unit)
+
+    utils.cache_entities(request['sessionId'], pantry=p)
+
+    response = responses.ADD_PANTRY_ITEM_SUCCESS.format(i=item)
+    return utils.apiai_response(request, displayText=response)
+
 
 actions = {
     # 'use_pantry_item': create_account,
     'add_meal': add_meal,
     # 'get_recipe_instructions': create_account,
     'get_remaining_nutrition': get_remaining_nutrition,
-    # 'add_pantry_item': create_account,
+    'add_pantry_item': add_pantry_item,
     # 'get_recipe_options': create_account,
     # 'use_recipe_ingredients': create_account,
     # 'get_recipe': create_account,

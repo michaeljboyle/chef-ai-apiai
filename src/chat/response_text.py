@@ -17,3 +17,7 @@ SIGNUP_SUCCESS = (
     "me know so I can better pick recipes you'll love!")
 
 ADD_MEAL_SUCCESS = 'Done, meal added successfully!'
+
+ADD_PANTRY_ITEM_SUCCESS = (
+    "Got it! Added {i[quantity]} {i[name]} to your pantry with an "
+    "expiration date {i[expDays]} days from now.")

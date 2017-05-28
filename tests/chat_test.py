@@ -21,10 +21,10 @@ from google.appengine.ext import ndb
 from google.appengine.ext import testbed
 
 from src.chat import chat
-from src.common import eater
+from src.common import eater, pantry
 import src.chat.utils as utils
+import src.chat.response_text as responses
 
-import datetime
 # [END imports]
 
 
@@ -61,7 +61,7 @@ class ChatTestCase(unittest.TestCase):
 
         # Test setting
         r = utils.apiai_response({}, displayText='test', speech='test2',
-                           data={'a': 1})
+                                 data={'a': 1})
         self.assertEqual(1, r.get('data').get('a'))
 
     def test_utils_get_source_id(self):
@@ -87,7 +87,8 @@ class ChatTestCase(unittest.TestCase):
     def test_utils_get_cached_entities(self, mock_memcache_key_maker):
         memcache.set('123.entities.account', 'abc')
         mock_memcache_key_maker.return_value = '123.entities'
-        self.assertEqual('abc', utils.get_cached_entities('123').get('account'))
+        self.assertEqual('abc',
+                         utils.get_cached_entities('123').get('account'))
         mock_memcache_key_maker.assert_called_with('123')
 
     @mock.patch('src.chat.utils._make_memcache_key')
@@ -104,30 +105,126 @@ class ChatTestCase(unittest.TestCase):
 
     @mock.patch('src.chat.utils.get_cached_entities')
     @mock.patch('src.chat.utils.get_source_id')
-    @mock.patch.object(eater.Eater, 'get_remaining_nutrition')
-    def test_chat_get_remaining_nutrition(self, mock_get_remaining_nutrition,
-                                          mock_get_source_id,
-                                          mock_get_cached_entities):
+    def test_chat_get_eater_from_request(self, mock_get_source_id,
+                                         mock_get_cached_entities):
         mock_get_cached_entities.return_value = {}
         mock_get_source_id.return_value = ('fb_id', '123')
         # Check queries for entity when none cached
-        request = {'sessionId': 'abc123'}
+        request = {'sessionId': None}
         e = eater.Eater(fb_id='123')
         e.put()
-        response = chat.get_remaining_nutrition(request)
-        mock_get_remaining_nutrition.assert_called()
-        self.assertEquals('You have', response['displayText'][:8])
+        queried1 = chat.get_eater_from_request(request)
+        self.assertEqual('123', queried1.fb_id)
 
         # Now test value returned from memcache
-        e = eater.Eater(fb_id='456')
+        e.fb_id = '456'
         e.put()
         mock_get_cached_entities.return_value = {'eater': e}
-        mock_get_source_id.return_value = ('fb_id', '456')
+        queried2 = chat.get_eater_from_request(request)
+        self.assertEqual('456', queried2.fb_id)
+
+    @mock.patch('src.chat.utils.get_cached_entities')
+    @mock.patch('src.chat.chat.get_eater_from_request')
+    def test_chat_get_pantry_from_request(self, get_eater,
+                                          get_cached_entities):
+        get_cached_entities.return_value = {}
+        # Check queries for entity when none cached
+        request = {'sessionId': None}
+        p = pantry.Pantry(address='abc')
+        k = p.put()
+        e = eater.Eater(pantry=k)
+        get_eater.return_value = e
+
+        queried1 = chat.get_pantry_from_request(request)
+        self.assertEqual('abc', queried1.address)
+
+        # Now test value returned from memcache
+        get_cached_entities.return_value = {
+            'pantry': pantry.Pantry(address='def')
+        }
+        queried2 = chat.get_pantry_from_request(request)
+        self.assertEqual('def', queried2.address)
+
+    @mock.patch('src.chat.utils.cache_entities')
+    @mock.patch('src.chat.chat.get_eater_from_request')
+    @mock.patch('src.chat.utils.apiai_response')
+    @mock.patch.object(eater.Eater, 'get_remaining_nutrition')
+    def test_chat_get_remaining_nutrition(self, mock_get_remaining_nutrition,
+                                          api_response, mock_get_eater,
+                                          cache_entities):
+        e = eater.Eater(fb_id='123')
+        mock_get_eater.return_value = e
+        api_response.return_value = 'apiai response'
+        nut = {
+            'cals': 1,
+            'protein': 2,
+            'fat': 3,
+            'carb': 4,
+            'fiber': 5,
+            'sodium': 6
+        }
+        mock_get_remaining_nutrition.return_value = nut
+        request = {'sessionId': 'abc123'}
+
         response = chat.get_remaining_nutrition(request)
+        mock_get_eater.assert_called_with(request)
         mock_get_remaining_nutrition.assert_called()
+        cache_entities.assert_called_with('abc123', eater=e)
+        api_response.assert_called_with(
+            request,
+            displayText=responses.GET_REMAINING_NUTRITION_SUCCESS.format(
+                n=nut))
+        self.assertEqual('apiai response', response)
 
         # Check in actions
         self.assertTrue('get_remaining_nutrition' in chat.actions)
+
+    @mock.patch('src.chat.utils.cache_entities')
+    @mock.patch('src.chat.chat.get_pantry_from_request')
+    @mock.patch('src.chat.utils.apiai_response')
+    @mock.patch('src.common.chef.add_pantry_item')
+    @mock.patch.object(eater.Eater, 'pantry')
+    def test_chat_add_pantry_item(self, mock_pantry, chef_add_pantry_item,
+                                  api_response, get_pantry,
+                                  cache_entities):
+        p = pantry.Pantry()
+        get_pantry.return_value = p
+        api_response.return_value = 'apiai response'
+        item = {
+            'name': 'apple',
+            'quantity': '1',
+            'expDays': '10'
+        }
+        chef_add_pantry_item.return_value = item
+        request = {
+            'sessionId': 'abc123',
+            'result': {
+                'resolvedQuery': 'Add 1 apple to my pantry',
+                'parameters': {
+                    'food': 'apple',
+                    'number': '1',
+                    'unit-weight': {
+                        'amount': 2,
+                        'unit': 'lb'
+                    }
+                }
+            }
+        }
+
+        response = chat.add_pantry_item(request)
+        get_pantry.assert_called_with(request)
+        chef_add_pantry_item.assert_called_with(
+            p, 'Add 1 apple to my pantry',
+            food='apple', number=1,
+            weight_amt=2, weight_unit='lb')
+        cache_entities.assert_called_with('abc123', pantry=p)
+        api_response.assert_called_with(
+            request,
+            displayText=responses.ADD_PANTRY_ITEM_SUCCESS.format(i=item))
+        self.assertEqual('apiai response', response)
+
+        # Check in actions
+        self.assertTrue('add_pantry_item' in chat.actions)
 
 
 # [START main]
